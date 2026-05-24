@@ -1,12 +1,38 @@
 @echo off
-call venv\Scripts\activate
+:: ============================================================
+::  build.bat — Gera o YT_Convert.exe via PyInstaller
+::  Execute na raiz do projeto com o venv ativado.
+:: ============================================================
 
-echo Limpando build antigo...
-rmdir \s \q build
-rmdir \s \q dist
+echo.
+echo  === Gerando YT_Convert.exe ===
+echo.
 
-echo Gerando EXE...
+:: Limpa builds anteriores
+if exist build   rmdir /s /q build
+if exist release rmdir /s /q release
+mkdir release
 
-python -m Pyinstaller --onefile --name YT_Converter main.py
+:: Gera o executável
+::   --onefile        → tudo em um único .exe
+::   --console        → mantém janela de terminal (CLI app)
+::   --icon           → ícone do .exe (coloque app.ico na raiz)
+::   --name           → nome do executável final
+::   --add-data       → inclui a pasta tools/ (ffmpeg.exe bundled)
+pyinstaller ^
+    --onefile ^
+    --console ^
+    --name "YT_Convert" ^
+    --icon "app.ico" ^
+    --add-data "tools;tools" ^
+    --distpath "release" ^
+    "src/main.py"
 
+:: Cria pasta output dentro de release para o usuário final
+if not exist release\output mkdir release\output
+
+echo.
+echo  === Build concluído! ===
+echo  Arquivo: release\YT_Convert.exe
+echo.
 pause

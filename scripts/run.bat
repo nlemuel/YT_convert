@@ -1,4 +1,5 @@
-@echo off 
+@echo off
+:: Ativa venv e roda a aplicação (uso dev)
 call venv\Scripts\activate
-python main.py
+python src\main.py
 pause

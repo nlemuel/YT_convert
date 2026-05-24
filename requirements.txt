@@ -1,10 +1,5 @@
-altgraph==0.17.5
-ffmpeg-python==0.2.0
-future==1.0.0
-packaging==26.2
-pefile==2024.8.26
-pyinstaller==6.20.0
-pyinstaller-hooks-contrib==2026.5
-pywin32-ctypes==0.2.3
-setuptools==82.0.1
-yt-dlp==2026.3.17
+# YouTube Downloader — Dependências
+# Instale com: pip install -r requirements.txt
+
+yt-dlp>=2024.1.1        # Download do YouTube (substitui pytube)
+pyinstaller>=6.0.0      # Geração do .exe para Windows
