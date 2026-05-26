@@ -1,38 +1,71 @@
 @echo off
-:: ============================================================
-::  build.bat — Gera o YT_Convert.exe via PyInstaller
-::  Execute na raiz do projeto com o venv ativado.
-:: ============================================================
+setlocal
 
+:: ─────────────────────────────────────────────────────
+::  build.bat  —  Gera release\YT_Convert.exe
+:: ─────────────────────────────────────────────────────
+
+cd /d "%~dp0.."
 echo.
-echo  === Gerando YT_Convert.exe ===
+echo  Raiz do projeto: %CD%
 echo.
 
-:: Limpa builds anteriores
+if not exist "venv\Scripts\activate.bat" (
+    echo  ERRO: venv nao encontrado.
+    echo  Execute:  python -m venv venv  ^&  pip install -r requirements.txt
+    pause & exit /b 1
+)
+
+if not exist "src\main.py" (
+    echo  ERRO: src\main.py nao encontrado em %CD%
+    pause & exit /b 1
+)
+
+call venv\Scripts\activate.bat
+
+where pyinstaller >nul 2>&1
+if errorlevel 1 (
+    echo  PyInstaller nao encontrado. Instalando...
+    pip install pyinstaller
+)
+
+echo  Limpando builds anteriores...
 if exist build   rmdir /s /q build
+if exist dist    rmdir /s /q dist
 if exist release rmdir /s /q release
 mkdir release
+if not exist tools mkdir tools
 
-:: Gera o executável
-::   --onefile        → tudo em um único .exe
-::   --console        → mantém janela de terminal (CLI app)
-::   --icon           → ícone do .exe (coloque app.ico na raiz)
-::   --name           → nome do executável final
-::   --add-data       → inclui a pasta tools/ (ffmpeg.exe bundled)
+echo  Gerando .exe...
+echo.
+
+:: %CD% garante paths absolutos — resolve o bug do PyInstaller
+:: que buscava tools\ relativo a build\ (--specpath) em vez da raiz
 pyinstaller ^
     --onefile ^
     --console ^
     --name "YT_Convert" ^
-    --icon "app.ico" ^
-    --add-data "tools;tools" ^
-    --distpath "release" ^
-    "src/main.py"
-
-:: Cria pasta output dentro de release para o usuário final
-if not exist release\output mkdir release\output
+    --add-data "%CD%\tools;tools" ^
+    --paths "%CD%\src" ^
+    --distpath "%CD%\release" ^
+    --workpath "%CD%\build" ^
+    --specpath "%CD%\build" ^
+    "%CD%\src\main.py"
 
 echo.
-echo  === Build concluído! ===
-echo  Arquivo: release\YT_Convert.exe
+if exist "release\YT_Convert.exe" (
+    if not exist "release\output" mkdir release\output
+    echo  ============================================
+    echo   Build concluido com sucesso!
+    echo   Arquivo: %CD%\release\YT_Convert.exe
+    echo  ============================================
+) else (
+    echo  ============================================
+    echo   ERRO: YT_Convert.exe nao foi gerado.
+    echo   Leia o log acima para identificar o problema.
+    echo  ============================================
+)
+
 echo.
 pause
+endlocal

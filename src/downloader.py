@@ -1,3 +1,13 @@
+"""
+downloader.py — Lógica de download e conversão via yt-dlp + ffmpeg.
+
+Suporta:
+  • Download de vídeo em MP4 com áudio AAC (sem Opus)
+  • Download de áudio em MP3 (máxima qualidade, VBR ~320 kbps)
+  • Playlists
+  • Barra de progresso no terminal
+"""
+
 import re
 from pathlib import Path
 from typing import Literal, Optional
@@ -7,10 +17,8 @@ from yt_dlp.utils import DownloadError, ExtractorError
 
 from config import OUTPUT_DIR
 
-# Tipo de formato aceito pela aplicação
 FormatoSaida = Literal["mp4", "mp3"]
 
-# Resoluções de vídeo disponíveis para seleção
 RESOLUCOES_DISPONIVEIS = ["2160", "1440", "1080", "720", "480", "360", "melhor"]
 
 
@@ -18,56 +26,55 @@ RESOLUCOES_DISPONIVEIS = ["2160", "1440", "1080", "720", "480", "360", "melhor"]
 # Progresso
 # ──────────────────────────────────────────────
 
+def _limpar_ansi(texto: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", texto)
+
+
 def _hook_progresso(d: dict) -> None:
-    """
-    Callback chamado pelo yt-dlp a cada chunk baixado.
-    Exibe progresso, velocidade e ETA na mesma linha.
-    """
     if d["status"] == "downloading":
         pct = _limpar_ansi(d.get("_percent_str", "??%")).strip()
         vel = _limpar_ansi(d.get("_speed_str", "N/A")).strip()
         eta = _limpar_ansi(d.get("_eta_str", "N/A")).strip()
         print(f"\r  ⬇  {pct:>6}  │  {vel:>12}  │  ETA {eta:>6}", end="", flush=True)
-
     elif d["status"] == "finished":
         print("\r  ✔  Download concluído. Processando...          ")
 
 
-def _limpar_ansi(texto: str) -> str:
-    """Remove códigos de escape ANSI de strings do yt-dlp."""
-    return re.sub(r"\x1b\[[0-9;]*m", "", texto)
-
-
 # ──────────────────────────────────────────────
-# Construção das opções do yt-dlp
+# Opções MP4
 # ──────────────────────────────────────────────
 
-def _opcoes_mp4(
-    ffmpeg_path: str,
-    resolucao: str = "melhor",
-    eh_playlist: bool = False,
-) -> dict:
+def _opcoes_mp4(ffmpeg_path: str, resolucao: str = "melhor", eh_playlist: bool = False) -> dict:
     """
-    Monta o dicionário de opções para download em MP4.
+    Estratégia para MP4 com áudio AAC garantido:
 
-    Args:
-        ffmpeg_path: Caminho absoluto para o executável ffmpeg.
-        resolucao:   Resolução desejada ('melhor', '1080', '720', ...).
-        eh_playlist: Se True, usa template de nome com índice da playlist.
+    O YouTube serve áudio em Opus (webm). Para forçar AAC no MP4 final,
+    usamos o postprocessor FFmpegVideoRemuxer + 'postprocessor_args' com
+    a chave especial 'default' — que o yt-dlp aplica a TODAS as chamadas
+    ffmpeg, incluindo o merge. Isso é mais confiável que tentar interceptar
+    apenas o FFmpegMerger, cujo nome interno pode variar entre versões.
 
-    Returns:
-        Dicionário de opções para YoutubeDL.
+    Alternativa mais robusta: baixar o áudio já em m4a (codec AAC nativo)
+    usando o seletor de formato [acodec=mp4a], evitando recodificação.
     """
     if resolucao == "melhor":
-        fmt = "bestvideo+bestaudio/best"
-    else:
-        # Tenta a resolução pedida; cai para a melhor disponível abaixo dela
+        # Prefere áudio m4a (AAC nativo) para evitar recodificação Opus→AAC
         fmt = (
-            f"bestvideo[height<={resolucao}]+bestaudio"
-            f"/bestvideo[height<={resolucao}]+bestaudio/best"
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]"
+            "/bestvideo+bestaudio[acodec=mp4a]"
+            "/bestvideo+bestaudio"
+            "/best"
+        )
+    else:
+        fmt = (
+            f"bestvideo[height<={resolucao}][ext=mp4]+bestaudio[ext=m4a]"
+            f"/bestvideo[height<={resolucao}]+bestaudio[acodec=mp4a]"
+            f"/bestvideo[height<={resolucao}]+bestaudio"
+            f"/best[height<={resolucao}]"
+            "/best"
         )
 
-    template_padrao = str(OUTPUT_DIR / "%(title)s.%(ext)s")
+    template_padrao  = str(OUTPUT_DIR / "%(title)s.%(ext)s")
     template_playlist = str(OUTPUT_DIR / "%(playlist_index)s_%(title)s.%(ext)s")
 
     return {
@@ -77,16 +84,11 @@ def _opcoes_mp4(
             "default": template_padrao,
             "pl_video": template_playlist if eh_playlist else template_padrao,
         },
-        # Garante recodificação de áudio compatível com MP4
-        "postprocessors": [
-            {
-                "key": "FFmpegVideoConvertor",
-                "preferedformat": "mp4",
-            }
-        ],
+        # 'postprocessor_args' com chave "default" é aplicado a TODA chamada
+        # ffmpeg feita pelo yt-dlp — merge incluso. Garante AAC mesmo quando
+        # o stream de áudio baixado é Opus (fallback da seleção acima).
         "postprocessor_args": {
-            # Copia stream de vídeo sem recodificar; recodifica áudio para AAC
-            "FFmpegVideoConvertor": ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"],
+            "default": ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"],
         },
         "ffmpeg_location": ffmpeg_path,
         "progress_hooks": [_hook_progresso],
@@ -94,27 +96,16 @@ def _opcoes_mp4(
         "quiet": True,
         "no_warnings": False,
         "ignoreerrors": False,
-        # Restaura títulos com caracteres especiais de forma segura
-        "restrictfilenames": False,
         "windowsfilenames": True,
     }
 
 
-def _opcoes_mp3(
-    ffmpeg_path: str,
-    eh_playlist: bool = False,
-) -> dict:
-    """
-    Monta o dicionário de opções para download em MP3 (melhor qualidade).
+# ──────────────────────────────────────────────
+# Opções MP3
+# ──────────────────────────────────────────────
 
-    Args:
-        ffmpeg_path: Caminho absoluto para o executável ffmpeg.
-        eh_playlist: Se True, usa template de nome com índice da playlist.
-
-    Returns:
-        Dicionário de opções para YoutubeDL.
-    """
-    template_padrao = str(OUTPUT_DIR / "%(title)s.%(ext)s")
+def _opcoes_mp3(ffmpeg_path: str, eh_playlist: bool = False) -> dict:
+    template_padrao   = str(OUTPUT_DIR / "%(title)s.%(ext)s")
     template_playlist = str(OUTPUT_DIR / "%(playlist_index)s_%(title)s.%(ext)s")
 
     return {
@@ -125,23 +116,20 @@ def _opcoes_mp3(
         },
         "postprocessors": [
             {
-                # Extrai e converte para MP3
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "0",  # 0 = VBR máxima qualidade (~320 kbps)
+                "preferredquality": "0",   # VBR máxima (~320 kbps)
             },
             {
-                # Embute metadados (artista, título, capa) no MP3
                 "key": "FFmpegMetadata",
                 "add_metadata": True,
             },
             {
-                # Incorpora thumbnail como capa do álbum
                 "key": "EmbedThumbnail",
             },
         ],
         "ffmpeg_location": ffmpeg_path,
-        "writethumbnail": True,          # necessário para EmbedThumbnail
+        "writethumbnail": True,
         "progress_hooks": [_hook_progresso],
         "noplaylist": not eh_playlist,
         "quiet": True,
@@ -152,7 +140,7 @@ def _opcoes_mp3(
 
 
 # ──────────────────────────────────────────────
-# Função principal de download
+# Função pública
 # ──────────────────────────────────────────────
 
 def baixar_video(
@@ -162,23 +150,10 @@ def baixar_video(
     ffmpeg_path: Optional[str] = None,
 ) -> Path:
     """
-    Faz o download de um vídeo ou playlist do YouTube e converte para o formato pedido.
-
-    Args:
-        url:         URL do vídeo ou playlist.
-        formato:     'mp4' para vídeo, 'mp3' para áudio.
-        resolucao:   Resolução desejada para MP4 ('melhor', '1080', '720', ...).
-                     Ignorado quando formato='mp3'.
-        ffmpeg_path: Caminho para o ffmpeg. Se None, yt-dlp usa o do PATH.
+    Faz download e conversão de um vídeo ou playlist do YouTube.
 
     Returns:
-        Path do arquivo gerado (ou da pasta output, no caso de playlist).
-
-    Raises:
-        DownloadError: Erro do yt-dlp (privado, indisponível, etc.)
-        ExtractorError: URL não reconhecida pelo yt-dlp.
-        PermissionError: Sem permissão de escrita na pasta de saída.
-        RuntimeError: ffmpeg não encontrado.
+        Path do arquivo gerado, ou da pasta output em caso de playlist.
     """
     if ffmpeg_path is None:
         raise RuntimeError(
@@ -187,17 +162,13 @@ def baixar_video(
         )
 
     eh_playlist = "playlist" in url
-
-    if formato == "mp3":
-        opcoes = _opcoes_mp3(ffmpeg_path, eh_playlist)
-    else:
-        opcoes = _opcoes_mp4(ffmpeg_path, resolucao, eh_playlist)
+    opcoes = _opcoes_mp3(ffmpeg_path, eh_playlist) if formato == "mp3" \
+             else _opcoes_mp4(ffmpeg_path, resolucao, eh_playlist)
 
     try:
         with YoutubeDL(opcoes) as ydl:
             info = ydl.extract_info(url, download=True)
 
-            # Playlist → retorna a pasta inteira
             if "entries" in info:
                 return OUTPUT_DIR
 
@@ -211,4 +182,4 @@ def baixar_video(
             "Verifique as permissões da pasta ou execute como administrador."
         )
     except (DownloadError, ExtractorError):
-        raise  # Re-lança para tratamento no main.py
+        raise
