@@ -3,3 +3,8 @@ dist/
 build/
 __pycache__/
 *.spec
+
+release/
+output/
+tools/*.exe
+*.mp4
