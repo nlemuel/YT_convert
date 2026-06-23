@@ -48,11 +48,20 @@ def atualizar_ytdlp(callback: Optional[Callable[[str], None]] = None) -> None:
     """
     Atualiza o yt-dlp se necessário.
 
+    Não executa quando rodando como .exe (PyInstaller frozen):
+      • sys.executable aponta para o próprio .exe, não para um Python
+      • chamar pip dentro do .exe relançaria o executável → loop de janelas
+      • o yt-dlp no .exe é a versão embutida no momento do build;
+        para atualizar, o dev gera um novo .exe e publica no GitHub Releases
+
     Args:
-        callback: Função opcional que recebe strings de status para exibir
-                  na UI (ex: label da GUI ou print no terminal).
+        callback: Função opcional que recebe strings de status.
                   Se None, usa print().
     """
+    # Bloqueio crítico: nunca rodar subprocess dentro do .exe frozen
+    if getattr(sys, "frozen", False):
+        return
+
     log = callback if callback else print
 
     if not _precisa_atualizar():
@@ -61,8 +70,6 @@ def atualizar_ytdlp(callback: Optional[Callable[[str], None]] = None) -> None:
     log("  🔄  Verificando atualização do yt-dlp...")
 
     try:
-        # Usa o mesmo executável Python do ambiente atual para garantir
-        # que o pacote correto seja atualizado (venv ou sistema)
         resultado = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "--quiet"],
             capture_output=True,
@@ -74,7 +81,6 @@ def atualizar_ytdlp(callback: Optional[Callable[[str], None]] = None) -> None:
             _registrar_atualizacao()
             log("  ✔  yt-dlp atualizado.")
         else:
-            # Falha no pip — não é crítico, continua normalmente
             log("  ⚠  Não foi possível atualizar o yt-dlp (sem internet?).")
 
     except subprocess.TimeoutExpired:

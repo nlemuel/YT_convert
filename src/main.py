@@ -158,4 +158,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Obrigatório no Windows para executáveis PyInstaller --onefile que
+    # usam threading/subprocess internamente (yt-dlp, ffmpeg, pip).
+    # Sem isso, cada processo filho relança o main() → loop de janelas.
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()
