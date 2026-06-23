@@ -29,6 +29,22 @@ YT_convert/
 ├── app.ico              ← ícone do .exe (coloque aqui)
 └── README.md
 ```
+gui.py — Interface gráfica Tkinter para o YouTube Downloader.
+
+Layout:
+  ┌─────────────────────────────────────────────┐
+  │  🎬 YouTube Downloader                      
+  ├─────────────────────────────────────────────┤
+  │  URL  [_________________________________]   │
+  │  Formato  ◉ MP4  ○ MP3                     
+  │  Resolução  [▼ Melhor disponível]           │
+  │  Destino  [C:\...\output]  [Alterar]        │
+  ├─────────────────────────────────────────────┤
+  │  [████████░░░░░░░░]  47%  •  2.3 MB/s       │
+  │  status...                                  │
+  ├─────────────────────────────────────────────┤
+  │  [  Baixar  ]  [  Cancelar  ]               │
+  └─────────────────────────────────────────────┘
 
 ---
 

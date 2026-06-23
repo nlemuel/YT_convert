@@ -1,157 +1,160 @@
+"""
+main.py — Launcher da aplicação.
+
+Modo .exe (usuário final):  abre sempre a GUI, sem CMD, sem loop.
+Modo script (dev):          abre GUI se Tkinter disponível, senão CLI.
+
+A separação entre frozen/script é feita ANTES de qualquer import pesado
+para evitar que o PyInstaller em modo --windowed tente criar um console.
+"""
+
 import sys
-from pathlib import Path
-from yt_dlp.utils import DownloadError, ExtractorError
-
-from config import OUTPUT_DIR
-from downloader import baixar_video, RESOLUCOES_DISPONIVEIS, FormatoSaida
-from utils import validar_url, verificar_ffmpeg, cabecalho, linha_separadora
 
 
-# ──────────────────────────────────────────────
-# Helpers de entrada
-# ──────────────────────────────────────────────
-
-def _pedir_url() -> str:
-    """Solicita a URL ao usuário e valida no loop."""
-    while True:
-        url = input("\n  Cole a URL do YouTube: ").strip()
-        if validar_url(url):
-            return url
-        print("  ✖  URL inválida. Use um link do youtube.com ou youtu.be.")
+def _eh_frozen() -> bool:
+    """True quando rodando como .exe gerado pelo PyInstaller."""
+    return getattr(sys, "frozen", False)
 
 
-def _pedir_formato() -> FormatoSaida:
-    """Solicita o formato de saída (MP4 ou MP3)."""
-    print("\n  Formato de saída:")
-    print("    [1] MP4 — vídeo (padrão)")
-    print("    [2] MP3 — apenas áudio (melhor qualidade)")
+def _rodar_gui() -> None:
+    """Abre a janela principal. Qualquer erro vira messagebox, nunca traceback."""
+    import tkinter as tk
+    from tkinter import messagebox
 
-    while True:
-        escolha = input("\n  Escolha [1/2, Enter=1]: ").strip()
-        if escolha in ("", "1"):
-            return "mp4"
-        if escolha == "2":
-            return "mp3"
-        print("  ✖  Opção inválida. Digite 1 ou 2.")
-
-
-def _pedir_resolucao() -> str:
-    """Solicita a resolução desejada para vídeo MP4."""
-    opcoes_exibidas = [r if r != "melhor" else "melhor (padrão)" for r in RESOLUCOES_DISPONIVEIS]
-
-    print("\n  Resolução de vídeo:")
-    for i, op in enumerate(opcoes_exibidas, 1):
-        print(f"    [{i}] {op}p" if "melhor" not in op else f"    [{i}] {op}")
-
-    while True:
-        escolha = input(f"\n  Escolha [1-{len(RESOLUCOES_DISPONIVEIS)}, Enter=melhor]: ").strip()
-        if escolha == "":
-            return "melhor"
-        if escolha.isdigit():
-            idx = int(escolha) - 1
-            if 0 <= idx < len(RESOLUCOES_DISPONIVEIS):
-                return RESOLUCOES_DISPONIVEIS[idx]
-        print(f"  ✖  Opção inválida. Digite um número entre 1 e {len(RESOLUCOES_DISPONIVEIS)}.")
+    try:
+        from gui import App
+        app = App()
+        app.mainloop()
+    except Exception as exc:
+        # Último recurso: janela de erro simples antes de fechar
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Erro ao iniciar", str(exc))
+        root.destroy()
 
 
-# ──────────────────────────────────────────────
-# Tratamento de erros do yt-dlp
-# ──────────────────────────────────────────────
+def _rodar_cli() -> None:
+    """CLI completa — usada apenas por devs via terminal."""
+    import signal
+    import threading
+    from pathlib import Path
+    from yt_dlp.utils import DownloadError, ExtractorError
 
-def _tratar_erro(e: Exception) -> None:
-    """Exibe mensagem amigável baseada no tipo/mensagem do erro."""
-    msg = str(e).lower()
+    from config import get_output_dir, set_output_dir
+    from downloader import baixar_video, CanceladoException, RESOLUCOES_DISPONIVEIS, FormatoSaida
+    from updater import atualizar_ytdlp
+    from utils import validar_url, verificar_ffmpeg, cabecalho, linha_separadora
 
-    if isinstance(e, RuntimeError):
-        print(f"\n  ✖  {e}")
-    elif isinstance(e, PermissionError):
-        print(f"\n  ✖  {e}")
-    elif "private" in msg:
-        print("\n  ✖  Este vídeo é privado e não pode ser baixado.")
-    elif "unavailable" in msg:
-        print("\n  ✖  Vídeo indisponível (removido, bloqueado por região, etc.).")
-    elif "sign in" in msg or "login" in msg:
-        print("\n  ✖  Este conteúdo exige login. Não é possível baixar.")
-    elif "network" in msg or "connection" in msg or "urlopen" in msg:
-        print("\n  ✖  Sem conexão com a internet. Verifique sua rede e tente novamente.")
-    elif isinstance(e, (DownloadError, ExtractorError)):
-        print(f"\n  ✖  Erro ao baixar: {e}")
-    else:
-        print(f"\n  ✖  Erro inesperado: {e}")
-
-
-# ──────────────────────────────────────────────
-# Fluxo principal
-# ──────────────────────────────────────────────
-
-def main() -> None:
-    """Ponto de entrada da aplicação."""
     cabecalho()
+    atualizar_ytdlp()
 
-    # 1. Verifica ffmpeg ─────────────────────────
     ffmpeg = verificar_ffmpeg()
     if not ffmpeg:
         print("\n  ✖  ffmpeg não encontrado.")
         print("     • Coloque ffmpeg.exe na pasta tools/")
         print("     • Ou instale e adicione ao PATH do sistema.")
-        print("     • Consulte o README para o passo a passo.")
-        _aguardar_saida()
         return
 
     print(f"\n  ✔  ffmpeg: {ffmpeg}")
 
-    # 2. Coleta inputs do usuário ────────────────
-    url = _pedir_url()
-    formato = _pedir_formato()
-    resolucao = _pedir_resolucao() if formato == "mp4" else "melhor"
+    pasta_atual = get_output_dir()
+    print(f"\n  📁  Pasta de destino: {pasta_atual}")
+    if input("     Alterar? [S/Enter=manter]: ").strip().lower() == "s":
+        nova = input("     Novo caminho: ").strip()
+        if nova:
+            try:
+                set_output_dir(Path(nova))
+                pasta_atual = Path(nova)
+            except Exception as e:
+                print(f"  ⚠  Mantendo pasta anterior. ({e})")
+                pasta_atual = get_output_dir()
 
-    # 3. Resumo antes de iniciar ─────────────────
+    while True:
+        url = input("\n  Cole a URL do YouTube: ").strip()
+        if validar_url(url):
+            break
+        print("  ✖  URL inválida.")
+
+    print("\n  Formato:  [1] MP4 — vídeo   [2] MP3 — áudio")
+    while True:
+        f = input("  Escolha [1/2, Enter=1]: ").strip()
+        if f in ("", "1"):
+            formato: FormatoSaida = "mp4"; break
+        if f == "2":
+            formato = "mp3"; break
+        print("  ✖  Digite 1 ou 2.")
+
+    resolucao = "melhor"
+    if formato == "mp4":
+        print("\n  Resolução:")
+        for i, r in enumerate(RESOLUCOES_DISPONIVEIS, 1):
+            print(f"    [{i}] {'melhor (padrão)' if r == 'melhor' else r + 'p'}")
+        while True:
+            r = input(f"  Escolha [1-{len(RESOLUCOES_DISPONIVEIS)}, Enter=melhor]: ").strip()
+            if r == "":
+                break
+            if r.isdigit() and 1 <= int(r) <= len(RESOLUCOES_DISPONIVEIS):
+                resolucao = RESOLUCOES_DISPONIVEIS[int(r) - 1]; break
+            print("  ✖  Opção inválida.")
+
     print()
     print(linha_separadora())
-    print(f"  URL:      {url}")
-    print(f"  Formato:  {formato.upper()}")
+    print(f"  URL:     {url}")
+    print(f"  Formato: {formato.upper()}")
     if formato == "mp4":
-        res_exibida = "Melhor disponível" if resolucao == "melhor" else f"{resolucao}p"
-        print(f"  Resolução: {res_exibida}")
-    print(f"  Destino:  {OUTPUT_DIR}")
+        print(f"  Resolução: {'Melhor disponível' if resolucao == 'melhor' else resolucao + 'p'}")
+    print(f"  Destino: {pasta_atual}")
     print(linha_separadora())
 
-    confirmacao = input("\n  Iniciar download? [Enter=sim / N=cancelar]: ").strip().lower()
-    if confirmacao in ("n", "nao", "não", "no"):
+    if input("\n  Iniciar? [Enter=sim / N=cancelar]: ").strip().lower() in ("n", "não", "no"):
         print("\n  Cancelado.")
-        _aguardar_saida()
         return
 
-    # 4. Download ────────────────────────────────
-    print()
+    cancel_event = threading.Event()
+
+    def _sig(sig, frame):
+        print("\n\n  ⏹  Cancelando...")
+        cancel_event.set()
+
+    signal.signal(signal.SIGINT, _sig)
+    print("\n  Pressione Ctrl+C para cancelar.\n")
+
     try:
         arquivo = baixar_video(
-            url=url,
-            formato=formato,
-            resolucao=resolucao,
-            ffmpeg_path=ffmpeg,
+            url=url, formato=formato, resolucao=resolucao,
+            ffmpeg_path=ffmpeg, output_dir=pasta_atual, cancel_event=cancel_event,
         )
-
         print()
         print(linha_separadora())
-        print("  ✔  Concluído com sucesso!")
+        print("  ✔  Concluído!")
         print(f"  📁 Salvo em: {arquivo}")
         print(linha_separadora())
-
+    except CanceladoException:
+        print("\n  ✖  Cancelado.")
+    except PermissionError as e:
+        print(f"\n  ✖  {e}")
+    except (DownloadError, ExtractorError) as e:
+        msg = str(e).lower()
+        if "private"     in msg: print("\n  ✖  Vídeo privado.")
+        elif "unavailable" in msg: print("\n  ✖  Vídeo indisponível.")
+        elif "sign in"   in msg: print("\n  ✖  Conteúdo exige login.")
+        elif "network"   in msg or "urlopen" in msg: print("\n  ✖  Sem internet.")
+        else: print(f"\n  ✖  Erro: {e}")
     except Exception as e:
-        _tratar_erro(e)
-
-    _aguardar_saida()
+        print(f"\n  ✖  Erro inesperado: {e}")
 
 
-def _aguardar_saida() -> None:
-    """
-    Quando executando como .exe, aguarda tecla antes de fechar,
-    para o usuário poder ler a mensagem final.
-    """
-    import getattr as _ga  # noqa: F401
-    if getattr(sys, "frozen", False):
-        input("\n  Pressione Enter para fechar...")
+def main() -> None:
+    if _eh_frozen():
+        # .exe → sempre GUI, sem fallback para CLI (evita loop de console)
+        _rodar_gui()
+    else:
+        # Script dev → tenta GUI; se não tiver Tkinter, usa CLI
+        try:
+            import tkinter  # noqa: F401
+            _rodar_gui()
+        except ImportError:
+            _rodar_cli()
 
 
 if __name__ == "__main__":
