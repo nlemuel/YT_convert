@@ -13,14 +13,9 @@ from config import TOOLS_DIR
 
 
 def validar_url(url: str) -> bool:
-    """Valida se a URL é do YouTube (vídeo, short, live ou playlist)."""
     if not url or not url.strip():
         return False
-    padrao = (
-        r"^(https?://)?(www\.)?"
-        r"(youtube\.com/(watch\?|shorts/|playlist\?|live/)|youtu\.be/).+"
-    )
-    return bool(re.match(padrao, url.strip()))
+    return url.strip().startswith(("http://", "https://"))
 
 
 def verificar_ffmpeg() -> Optional[str]:

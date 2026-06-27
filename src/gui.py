@@ -3,7 +3,7 @@ gui.py — Interface gráfica Tkinter para o YouTube Downloader.
 
 Layout:
   ┌─────────────────────────────────────────────┐
-  │  🎬 YouTube Downloader                       │
+  │  🎬 Título                       │
   ├─────────────────────────────────────────────┤
   │  URL  [_________________________________]    │
   │  Formato  ◉ MP4  ○ MP3                       │
@@ -62,7 +62,7 @@ class App(tk.Tk):
         # Oculta a janela enquanto constrói para evitar flash de posição
         self.withdraw()
 
-        self.title("YouTube Downloader")
+        self.title("Bibi's Download")
         self.resizable(False, False)
         self.configure(bg=COR_BG)
 
@@ -95,7 +95,7 @@ class App(tk.Tk):
 
         # Título
         tk.Label(
-            self, text="🎬  YouTube Downloader",
+            self, text="🎬  Bibi's Download",
             font=("Segoe UI", 14, "bold"),
             bg=COR_BG, fg=COR_ACCENT,
         ).pack(pady=(18, 4))
@@ -113,7 +113,7 @@ class App(tk.Tk):
         frame.pack(fill="x", **pad)
 
         # ── URL ──────────────────────────────────────────────────────────────
-        self._label_row(frame, "URL do YouTube")
+        self._label_row(frame, "Bibi, baixa para mim esse link:")
         self._url_var = tk.StringVar()
         self._entry_url = tk.Entry(
             frame, textvariable=self._url_var, width=52,
@@ -125,7 +125,7 @@ class App(tk.Tk):
         self._entry_url.pack(fill="x", pady=(2, 10))
 
         # ── Formato ───────────────────────────────────────────────────────────
-        self._label_row(frame, "Formato")
+        self._label_row(frame, "O formato tem que ser:")
         fmt_frame = tk.Frame(frame, bg=COR_BG)
         fmt_frame.pack(fill="x", pady=(2, 10))
 
@@ -152,7 +152,7 @@ class App(tk.Tk):
         self._combo_res.pack(anchor="w", pady=(2, 10))
 
         # ── Pasta de destino ──────────────────────────────────────────────────
-        self._label_row(frame, "Pasta de destino")
+        self._label_row(frame, "Deixa guardado na pasta:")
         dest_frame = tk.Frame(frame, bg=COR_BG)
         dest_frame.pack(fill="x", pady=(2, 10))
 
@@ -373,7 +373,7 @@ class App(tk.Tk):
             if pct >= 100:
                 self._set_status("⚙  Processando (ffmpeg)...", COR_AVISO)
             else:
-                self._set_status(f"⬇  Baixando...  {pct:.1f}%", COR_ACCENT)
+                self._set_status(f"⬇  Pera aí que eu já tô baixando...  {pct:.1f}%", COR_ACCENT)
         self.after(0, _update)
 
     def _cancelar_download(self) -> None:
@@ -391,7 +391,7 @@ class App(tk.Tk):
         self._vel_label.config(text="")
         self._set_status(f"✔  Salvo em: {arquivo}", COR_SUCESSO)
         self._resetar_botoes()
-        messagebox.showinfo("Concluído!", f"Arquivo salvo em:\n{arquivo}")
+        messagebox.showinfo("Concluído! Mais alguma coisa?", f"Arquivo salvo em:\n{arquivo}")
 
     def _ao_cancelar_ui(self) -> None:
         self._baixando = False
